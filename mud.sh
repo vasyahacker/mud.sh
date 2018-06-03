@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 usage()
 {
@@ -49,14 +49,17 @@ done
 
 pdir=./players
 ldir=./locations
+online=./online
+lpid=""
+adm_id=1
 
 dirmap(){
   local var=""
   case "$1" in
     n) val='north';;
     s) val='south';;
-    w) val='east' ;;
-    e) val='west' ;;
+    w) val='west' ;;
+    e) val='east' ;;
     u) val='up'   ;;
     d) val='down' ;;
     *) val='error';;
@@ -64,8 +67,9 @@ dirmap(){
   printf "$val"
 }
 
-[ -e $pdir ] || mkdir $pdir
-[ -e $ldir ] || mkdir $ldir
+[ -e $pdir ]   || mkdir $pdir
+[ -e $ldir ]   || mkdir $ldir
+[ -e $online ] || mkdir $online
 
 new_player() # id,name
 {
@@ -112,7 +116,7 @@ location_create() # exit_dir, exit_location_id, to_dir
   } || ln -sfn ../../../$pdir/$plid $new_loc/who # only first time
   printf "Empty location" > $new_loc/name
   printf "there's nothing here" > $new_loc/descr
-  # unlock location
+  # unlock locations
 }
 
 location_new() # direct
@@ -158,10 +162,17 @@ location_show() # id
   echo
   printf "Here is: "
   local my_name="`cat $pdir/$plid/name`"
-  for pf_name in `ls -A1 $l/who/*/name`
+  local i=1
+  for pf in $l/who/*
   do
-    local p_name=`cat $pf_name`
-    [ "$my_name" != "$p_name" ] && printf "$p_name " || printf "You"
+    local p_name=`cat $pf/name`
+    [ $i -eq 1 ] || printf ", "
+    ((i++))
+
+    [ "$my_name" != "$p_name" ] && {
+      printf "$p_name"
+      [ -e $pf/online ] || printf "(sleeps)"
+    } || printf "You"
   done
   echo
 }
@@ -213,11 +224,30 @@ location_edit() # CMD
   echo "Ok"
 }
 
-say()
+msg_append(){ #file msg
+  while [ -e $1.lock ]; do sleep 0.4; done;
+  touch $1.lock
+  echo "$2" >> $1
+  rm -f $1.lock
+}
+
+msg(){ # text
+  local where_id="`cat $pdir/$plid/where`"
+  local l=$ldir/$where_id
+  for pf in $l/who/*
+  do
+    [ "$pf" != "$l/who/$plid" ] && [ -e $pf/online ] && {
+      msg_append $pf/msg "$1" &
+    }
+  done
+}
+
+say() # text
 {
   [ -z "$1" ] && return
-  local my_name="`cat $pdir/$plid/name`"
   echo "You say: $1"
+  local my_name="`cat $pdir/$plid/name`"
+  msg "$my_name say: $1"
 }
 
 go() # direction
@@ -229,9 +259,13 @@ go() # direction
     local to_id="`cat $from/exit_$dir`"
     local to=$ldir/$to_id
     [ -e $to ] && {
+      local my_name="`cat $pdir/$plid/name`"
       echo "You going to `dirmap $dir`"
+      msg "$my_name goes to `dirmap $dir`"
       mv $from/who/$plid $to/who/$plid
       printf "$to_id" > $p_where
+      local rdir="`revese_dir $dir`"
+      msg "$my_name came from the `dirmap $rdir`"
       location_show "$to_id"
     } || {
       echo "error go"
@@ -240,8 +274,48 @@ go() # direction
   } || echo "You can't move to `dirmap $dir`"
 }
 
+msg_get_clear(){ # file
+  [ -s $1 ] || return
+  while [ -e $1.lock ]; do sleep 0.4; done
+  touch $1.lock
+  cat $1 
+  > $1
+  rm -f $1.lock
+}
+
+listener(){
+  local msg=$pdir/$plid/msg
+  [ -e $msg ] || touch $msg 
+  while true; do
+    msg_get_clear $msg &
+    sleep 0.4
+  done
+}
+
+on_line(){
+  ln -sfn ../../../$pdir/$plid $ldir/1/who
+  ln -sfn ../$pdir/$plid $online
+  touch $pdir/$plid/online
+  local my_name="`cat $pdir/$plid/name`"
+  msg "$my_name woke up"
+}
+
+off_line(){
+  local my_name="`cat $pdir/$plid/name`"
+  msg "$my_name fell asleep"
+  rm -f $online/$plid
+  rm -f $pdir/$plid/online
+}
+
+quit(){
+  echo "Good bye! Exiting.."
+  off_line
+  kill $lpid >/dev/null 2>&1
+  exit
+}
+
 shopt -s extglob
-action(){
+cmd_parser(){
   case "$CMD" in
     l|см) location_show "`cat $pdir/$plid/where`" ;;
     ladd\ [nsewud]) location_new "${CMD: -1}";;
@@ -253,7 +327,7 @@ action(){
     ldescr\ *) location_edit "$CMD";;
     [nsewud]) go "$CMD";;
     llist) locations_list;;
-    /exit|/quit) echo "Good bye! Exiting.."; exit;;
+    /exit|/quit) quit;;
     /help|help|\?) help;;
     *) say "$CMD";;
   esac
@@ -309,12 +383,16 @@ EOF
 [ `l_new_id` == "1" ] && location_create
 
 [ "$SHELL" = true ] && {
-
+  
+  trap quit SIGHUP SIGINT SIGTERM
   echo "Welcome to the mud.sh world!"
   echo "Type 'help' if you newbie"
-  location_show "`cat $pdir/$plid/where`"
-  while true; do read CMD; action ;done
+  listener &
+  lpid=$!
+  on_line
+  location_show "`cat $pdir/$plid/where`"  
+  while true; do read CMD; cmd_parser ;done
 
-} || action
+} || cmd_parser
 
 # vim: noai:ts=2 sw=2 et nu autoindent
