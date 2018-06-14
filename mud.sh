@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
+platform='unknown'
+unamestr=`uname`
+MD5="md5"
+md5_opts=''
+hd=~/.mudsh         # home dir
+pdir=$hd/players    # players dir
+ldir=$hd/locations  # locations dir
+online=$hd/online   # on-line players dir
+
+[ "$unamestr" == "Linux" ] && { MD5="md5sum"; md5_opts='--'; platform='linux'; }
+[ "$unamestr" == 'Darwin' ] && { platform='darwin'; }
+[ "$unamestr" == 'FreeBSD' ] && { platform='freebsd'; }
+
 usage()
 {
   cat <<-EOF
@@ -8,29 +21,46 @@ USAGE: mud.sh <OPTIONS>
 
 OPTIONS
 
-  -pid=ID      Set player id
-  -cmd=COMMAND Send game command
-  -s | --shell Run in the shell interactive mode
+  -pid=ID          Set player id
+  -cmd=COMMAND     Send game command
+  -ns | --no-shell Dont run the shell mode
+  -ltp=PORT        Listen tcp PORT
 
 EOF
   return
 }
-SHELL=false
+
+SHELL=true
 
 for i in "$@"
 do
 case $i in
     -pid=*)
       plid="${i#*=}"
-      [[ "$plid" =~ ^[0-9]+$ ]] || { echo "Bad player id"; exit 1; }
+      [[ "$plid" =~ ^[0-9a-zA-Z]{3,18}@[a-z]+$ ]] || {
+        echo "Bad player id"
+        exit 1
+      }
       shift
     ;;
       -cmd=*)
       CMD="${i#*=}"
       shift
     ;;
-    -s|--shell)
-      SHELL=true
+      -ltp=*)
+      TPort="${i#*=}"
+      [[ "$TPort" =~ ^[0-9]{2,5}$ ]] || { echo "Bad port number"; exit 1; }
+      type socat >/dev/null 2>&1 && {
+        socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" &
+      } || {
+        echo "socat needed for listen tcp port"
+        echo "Install socat please"
+        exit 1
+      }
+      shift
+    ;;
+    -ns|--no-shell)
+      SHELL=false
       shift
     ;;
     -h|--help)
@@ -45,41 +75,104 @@ case $i in
 esac
 done
 
-[ -z "$plid" ] && { echo "Your player id is required, try -h for help"; exit 1; }
 
-pdir=./players
-ldir=./locations
-online=./online
-lpid=""
-adm_id=1
-
-dirmap(){
-  local var=""
-  case "$1" in
-    n) val='north';;
-    s) val='south';;
-    w) val='west' ;;
-    e) val='east' ;;
-    u) val='up'   ;;
-    d) val='down' ;;
-    *) val='error';;
-  esac
-  printf "$val"
+[ -e $hd ] || {
+  echo "Creating database in $hd..."
+  mkdir -p $pdir
+  chmod 700 $pdir
+  mkdir $ldir
+  mkdir $online
+  touch $hd/.passwd
 }
 
-[ -e $pdir ]   || mkdir $pdir
-[ -e $ldir ]   || mkdir $ldir
-[ -e $online ] || mkdir $online
+passfile=$hd/.passwd
+
+lpid=""
+#adm_id=1
+
+dirmap(){
+  case "$1" in
+    n) printf 'north';;
+    s) printf 'south';;
+    w) printf 'west' ;;
+    e) printf 'east' ;;
+    u) printf 'up'   ;;
+    d) printf 'down' ;;
+    *) printf 'error';;
+  esac
+}
 
 new_player() # id,name
 {
-  [[ "$1" =~ ^[0-9]+$ ]] || { echo "Bad player id"; return; }
+  [[ "$1" =~ ^[a-zA-Z]{3,18}@[a-z]+$ ]] || { echo "Bad player id"; return; }
   [[ "$2" =~ ^[a-zA-Z]{3,18}$ ]] || { echo "Bad player name"; return; }
   [ -d $pdir/$1 ] && { echo "Player with $1 id already exist"; return; }
   mkdir -p $pdir/$1
   printf "$2" > $pdir/$1/name
   printf "1"  > $pdir/$1/where
-  ln -sfn ../../../$pdir/$plid $ldir/1/who
+  ln -sfn ../../../players/$plid $ldir/1/who
+}
+
+registration(){
+  local login
+  local domain="local"
+  local password1
+  local password2
+  echo "Registration"
+  while true
+  do
+    echo "login must be 3-18 chars or nums"
+    printf "login: "
+    read login
+    grep -q "$login@$domain" "$passfile" && {
+      echo "login already exist"
+      continue
+    }
+    [[ "$login" =~ ^[0-9a-zA-Z]{3,18}$ ]] && break
+  done
+  while true
+  do
+    printf "password:\e[30;40m"
+    read password1
+    printf "\e[0mrepeat password:\e[30;40m"
+    read password2
+    printf "\e[0m"
+    [ "$password1" == "$password2" ] && break || {
+      echo "Passwords missmatch"
+      continue
+    }
+  done
+  echo "$login@$domain:`echo "$password1" | $MD5`" >> $passfile
+  plid="$login@$domain"
+  while true
+  do
+    printf "Your name (3-18 chars): "
+    read name
+    new_player "$plid" "$name"
+    [[ "$name" =~ ^[0-9a-zA-Z]{3,18}$ ]] && break
+  done
+}
+
+login(){
+  local login
+  local domain="local"
+  local password
+  while [ -z "$plid" ]
+  do
+    printf "type 'n' for registration or login: "
+    read login
+    [ "$login" == "n" ] && {
+      registration
+      return
+    }
+    printf "password:\e[30;40m"
+    read password
+    printf "\e[0m"
+    grep -q "$login@$domain:`echo "$password" | $MD5`" "$passfile" && {
+      plid="$login@$domain"
+      break
+    } || echo "Login or password incorrect"
+  done
 }
 
 revese_dir() # direct
@@ -113,7 +206,7 @@ location_create() # exit_dir, exit_location_id, to_dir
   [ -n "$2" ] && {
     printf "$2" > $new_loc/exit_$1
     printf "$new_id" > $ldir/$2/exit_$3
-  } || ln -sfn ../../../$pdir/$plid $new_loc/who # only first time
+  } || ln -sfn ../../../players/$plid $new_loc/who # only first time
   printf "Empty location" > $new_loc/name
   printf "there's nothing here" > $new_loc/descr
   # unlock locations
@@ -237,7 +330,7 @@ msg(){ # text
   for pf in $l/who/*
   do
     [ "$pf" != "$l/who/$plid" ] && [ -e $pf/online ] && {
-      msg_append $pf/msg "$1" &
+      msg_append "$pf/msg" "$1" &
     }
   done
 }
@@ -293,8 +386,8 @@ listener(){
 }
 
 on_line(){
-  ln -sfn ../../../$pdir/$plid $ldir/1/who
-  ln -sfn ../$pdir/$plid $online
+  ln -sfn ../../../players/$plid $ldir/1/who
+  ln -sfn ../players/$plid $online
   touch $pdir/$plid/online
   local my_name="`cat $pdir/$plid/name`"
   msg "$my_name woke up"
@@ -372,17 +465,11 @@ llist:
 EOF
 }
 
-[ -d $pdir/$plid ] && {
-  name="`cat $pdir/$plid/name`"
-} || {
-  printf "Your name (3-18 chars): "
-  read name
-  new_player "$plid" "$name" 
-}
+[ -z "$plid" ] && [ "$SHELL" == true ] && login
 
-[ `l_new_id` == "1" ] && location_create
+[ "`l_new_id`" == "1" ] && location_create
 
-[ "$SHELL" = true ] && {
+[ "$SHELL" == true ] && {
   
   trap quit SIGHUP SIGINT SIGTERM
   echo "Welcome to the mud.sh world!"
@@ -390,7 +477,7 @@ EOF
   listener &
   lpid=$!
   on_line
-  location_show "`cat $pdir/$plid/where`"  
+  location_show "`cat $pdir/$plid/where`"
   while true; do read CMD; cmd_parser ;done
 
 } || cmd_parser
