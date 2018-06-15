@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
 
-# TODO
-# daemonize
-# ltp and upnp checks and kill port
-
-hd=~/.mudsh          # home dir
-pdir=$hd/players     # players dir
-ldir=$hd/locations   # locations dir
-online=$hd/online    # on-line players dir
-SHELL=true           # default shell mode
-TPort=false          # TCP port for telnet service
-TPortFile=$hd/tport  # Saved TPort for stop UPnP
-TSPidFile=$hd/tspid  # Telnet service process id
-MyLocalIp=false      # Local ip for UPnP
-passfile=$hd/.passwd # users and passwords
-lpid=""              # message listener process id
+hd=~/.mudsh             # home dir
+WorldName=$hd/WorldName # world name
+pdir=$hd/players        # players dir
+ldir=$hd/locations      # locations dir
+online=$hd/online       # on-line players dir
+SHELL=true              # default shell mode
+TPort=false             # TCP port for telnet service
+TPortFile=$hd/tport     # Saved TPort to disable UPnP
+TSPidFile=$hd/tspid     # Telnet service process id
+MyLocalIp=false         # Local ip for UPnP
+passfile=$hd/.passwd    # users and passwords
+lpid=""                 # message listener process id
 platform='unknown'
 unamestr=`uname`
 MD5="md5"
 md5_opts=''
+
+[ -e $WorldName ] && wName="`cat $WorldName`"
 
 [ "$unamestr" == "Linux" ] && { MD5="md5sum"; md5_opts='--'; platform='linux'; }
 [ "$unamestr" == 'Darwin' ] && { platform='darwin'; }
@@ -35,7 +34,7 @@ OPTIONS
   -pid=ID          Player id
   -cmd=COMMAND     Send game command
   -ns | --no-shell Dont run the shell mode
-  -ltp=PORT        Listen tcp PORT and start telnet service
+  -ltp=PORT        Listen TCP PORT and start telnet service
   -upnp            Use UPnP for share your port to world
   -tstop           Stop telnet service
 
@@ -62,7 +61,7 @@ case $i in
       TPort="${i#*=}"
       [[ "$TPort" =~ ^[0-9]{2,5}$ ]] || { echo "Bad port number"; exit 1; }
       type socat >/dev/null 2>&1 || {
-        echo "socat needed for listen tcp port"
+        echo "socat needed for listen TCP port"
         echo "Install socat please"
         exit 1
       }
@@ -85,7 +84,7 @@ case $i in
           echo "$((i+1)) - ${MyLocalIp[i]}"
         done
         until
-          printf "Choice your lan address (1-$adrnum): "
+          printf "Choice your LAN ip address (1-$adrnum): "
           read num
           [[ "$num" =~ ^[0-9]{1,2}$ ]] && [ $num -ge 1 ] && [ $num -le $adrnum ]
         do true; done
@@ -95,11 +94,11 @@ case $i in
     ;;
     -tstop)
       [ -e $TSPidFile ] && {
-        echo "Stoping telnet service.."
+        echo "Stopping telnet service.."
         kill `cat $TSPidFile`
         rm -f $TSPidFile
         [ -e $TPortFile ] && {
-          echo "Stoping UPnP port forwarding.."
+          echo "Stopping UPnP port forwarding.."
           upnpc -d `cat $TPortFile` TCP
           rm -f $TPortFile
         }
@@ -120,27 +119,6 @@ esac
 done
 
 
-[ -e $hd ] || {
-  echo "Creating database in $hd..."
-  mkdir -p $pdir
-  chmod 700 $pdir
-  mkdir $ldir
-  mkdir $online
-  touch $hd/.passwd
-}
-
-[ "$TPort" != false ] && {
-  echo "Starting telnet service, see $hd/socat.log for details"
-#  echo " and run $0 "
-  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" 2>&1 &
-  echo "$!" > $TSPidFile
-  [ "$MyLocalIp" != false ] && {
-    echo "UPnP TCP port $TPort forwarding.."
-    upnpc -a $MyLocalIp $TPort $TPort TCP
-    echo "$TPort" > $TPortFile
-  }
-}
-
 dirmap(){
   case "$1" in
     n) printf 'north';;
@@ -155,7 +133,7 @@ dirmap(){
 
 new_player() # id,name
 {
-  [[ "$1" =~ ^[a-zA-Z]{3,18}@[a-z]+$ ]] || { echo "Bad player id"; return; }
+  [[ "$1" =~ ^[a-zA-Z]{3,18}@[a-zA-Z0-9]+$ ]] || { echo "Bad player id"; return; }
   [[ "$2" =~ ^[a-zA-Z]{3,18}$ ]] || { echo "Bad player name"; return; }
   [ -d $pdir/$1 ] && { echo "Player with $1 id already exist"; return; }
   mkdir -p $pdir/$1
@@ -166,7 +144,7 @@ new_player() # id,name
 
 registration(){
   local login
-  local domain="local"
+  local domain="$wName"
   local password1
   local password2
   echo "Registration"
@@ -205,7 +183,7 @@ registration(){
 
 login(){
   local login
-  local domain="local"
+  local domain="$wName"
   local password
   while [ -z "$plid" ]
   do
@@ -248,15 +226,15 @@ l_new_id()
 
 location_create() # exit_dir, exit_location_id, to_dir
 {
+  # lock locations
   local new_id=`l_new_id`
   local new_loc=$ldir/$new_id
-  # lock locations
   mkdir $new_loc
   mkdir $new_loc/who
   [ -n "$2" ] && {
     printf "$2" > $new_loc/exit_$1
     printf "$new_id" > $ldir/$2/exit_$3
-  } || ln -sfn ../../../players/$plid $new_loc/who # only first time
+  } 
   printf "Empty location" > $new_loc/name
   printf "there's nothing here" > $new_loc/descr
   # unlock locations
@@ -456,12 +434,12 @@ quit(){
   off_line
   kill $lpid >/dev/null 2>&1
   [ "$MyLocalIp" != false ] && [ -e /TSPidFile ] && {
-    echo "Stoping telnet service.."
+    echo "Stopping telnet service.."
     kill `cat $TSPidFile`
     rm -f $TSPidFile
   }
   [ "$TPort" != false ] && {
-    echo "Stoping UPnP port forwarding.."
+    echo "Stopping UPnP port forwarding.."
     upnpc -d $TPort TCP
     rm -f $TPortFile
   }
@@ -526,14 +504,44 @@ llist:
 EOF
 }
 
-[ -z "$plid" ] && [ "$SHELL" == true ] && login
 
-[ "`l_new_id`" == "1" ] && location_create
+[ -e $hd ] || {
+  echo "Creating database in $hd..."
+  mkdir -p $pdir
+  chmod 700 $pdir
+  mkdir $ldir
+  mkdir $online
+  touch $hd/.passwd
+  until
+    printf "Your personal world name (3-18 chars): "
+    read wName
+    [[ "$wName" =~ ^[0-9a-zA-Z]{3,18}$ ]]
+  do true; done
+  echo "$wName" > $WorldName
+  echo "Creating first location.."
+  location_create
+}
+
+[ "$TPort" != false ] && {
+  echo "Starting telnet service, see $hd/socat.log for details"
+  [ "$SHELL" == true ] && {
+    echo "Run $0 -tstop if you need to stop service in future"
+  }
+  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" 2>&1 &
+  echo "$!" > $TSPidFile
+  [ "$MyLocalIp" != false ] && {
+    echo "UPnP TCP port $TPort forwarding.."
+    upnpc -a $MyLocalIp $TPort $TPort TCP
+    echo "$TPort" > $TPortFile
+  }
+}
+
+[ -z "$plid" ] && [ "$SHELL" == true ] && login
 
 [ "$SHELL" == true ] && {
   
   trap quit SIGHUP SIGINT SIGTERM
-  echo "Welcome to the mud.sh world!"
+  echo "Welcome to the $wName world!"
   echo "Type 'help' if you newbie"
   listener &
   lpid=$!
