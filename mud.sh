@@ -139,6 +139,7 @@ new_player() # id,name
   mkdir -p $pdir/$1
   printf "$2" > $pdir/$1/name
   printf "1"  > $pdir/$1/where
+  #mkfifo $pdir/$1/msg
   ln -sfn ../../../players/$plid $ldir/1/who
 }
 
@@ -432,13 +433,14 @@ quit(){
   echo
   echo "Good bye! Exiting.."
   off_line
+  kill `jobs -p` >/dev/null 2>&1
   kill $lpid >/dev/null 2>&1
-  [ "$MyLocalIp" != false ] && [ -e /TSPidFile ] && {
+  [ "$TPort" != false ] && {
     echo "Stopping telnet service.."
-    kill `cat $TSPidFile`
+    kill `cat $TSPidFile` >/dev/null 2>&1
     rm -f $TSPidFile
   }
-  [ "$TPort" != false ] && {
+  [ "$MyLocalIp" != false ] && {
     echo "Stopping UPnP port forwarding.."
     upnpc -d $TPort TCP
     rm -f $TPortFile
@@ -527,7 +529,7 @@ EOF
   [ "$SHELL" == true ] && {
     echo "Run $0 -tstop if you need to stop service in future"
   }
-  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" 2>&1 &
+  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" > /dev/null 2>&1 &
   echo "$!" > $TSPidFile
   [ "$MyLocalIp" != false ] && {
     echo "UPnP TCP port $TPort forwarding.."
