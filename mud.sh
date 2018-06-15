@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 
+# TODO
+# daemonize
+# ltp and upnp checks and kill port
+
+hd=~/.mudsh          # home dir
+pdir=$hd/players     # players dir
+ldir=$hd/locations   # locations dir
+online=$hd/online    # on-line players dir
+SHELL=true           # default shell mode
+TPort=false          # TCP port for telnet service
+TPortFile=$hd/tport  # Saved TPort for stop UPnP
+TSPidFile=$hd/tspid  # Telnet service process id
+MyLocalIp=false      # Local ip for UPnP
+passfile=$hd/.passwd # users and passwords
+lpid=""              # message listener process id
 platform='unknown'
 unamestr=`uname`
 MD5="md5"
 md5_opts=''
-hd=~/.mudsh         # home dir
-pdir=$hd/players    # players dir
-ldir=$hd/locations  # locations dir
-online=$hd/online   # on-line players dir
 
 [ "$unamestr" == "Linux" ] && { MD5="md5sum"; md5_opts='--'; platform='linux'; }
 [ "$unamestr" == 'Darwin' ] && { platform='darwin'; }
@@ -21,16 +32,16 @@ USAGE: mud.sh <OPTIONS>
 
 OPTIONS
 
-  -pid=ID          Set player id
+  -pid=ID          Player id
   -cmd=COMMAND     Send game command
   -ns | --no-shell Dont run the shell mode
-  -ltp=PORT        Listen tcp PORT
+  -ltp=PORT        Listen tcp PORT and start telnet service
+  -upnp            Use UPnP for share your port to world
+  -tstop           Stop telnet service
 
 EOF
   return
 }
-
-SHELL=true
 
 for i in "$@"
 do
@@ -50,9 +61,7 @@ case $i in
       -ltp=*)
       TPort="${i#*=}"
       [[ "$TPort" =~ ^[0-9]{2,5}$ ]] || { echo "Bad port number"; exit 1; }
-      type socat >/dev/null 2>&1 && {
-        socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" &
-      } || {
+      type socat >/dev/null 2>&1 || {
         echo "socat needed for listen tcp port"
         echo "Install socat please"
         exit 1
@@ -62,6 +71,41 @@ case $i in
     -ns|--no-shell)
       SHELL=false
       shift
+    ;;
+    -upnp)
+      type upnpc >/dev/null 2>&1 || {
+        echo "upnpc needed for port forward"
+        echo "install miniupnpc please"
+        exit 1
+      }
+      MyLocalIp=( `ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -vE '^127\.'` )
+      adrnum=${#MyLocalIp[@]}
+      [ "$adrnum" = "1" ] || {
+        for (( i = 0; i < $adrnum; i++ )); do
+          echo "$((i+1)) - ${MyLocalIp[i]}"
+        done
+        until
+          printf "Choice your lan address (1-$adrnum): "
+          read num
+          [[ "$num" =~ ^[0-9]{1,2}$ ]] && [ $num -ge 1 ] && [ $num -le $adrnum ]
+        do true; done
+        MyLocalIp=${MyLocalIp[--num]}
+      }
+      shift
+    ;;
+    -tstop)
+      [ -e $TSPidFile ] && {
+        echo "Stoping telnet service.."
+        kill `cat $TSPidFile`
+        rm -f $TSPidFile
+        [ -e $TPortFile ] && {
+          echo "Stoping UPnP port forwarding.."
+          upnpc -d `cat $TPortFile` TCP
+          rm -f $TPortFile
+        }
+      }
+      shift
+      exit
     ;;
     -h|--help)
       usage
@@ -85,10 +129,17 @@ done
   touch $hd/.passwd
 }
 
-passfile=$hd/.passwd
-
-lpid=""
-#adm_id=1
+[ "$TPort" != false ] && {
+  echo "Starting telnet service, see $hd/socat.log for details"
+#  echo " and run $0 "
+  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" 2>&1 &
+  echo "$!" > $TSPidFile
+  [ "$MyLocalIp" != false ] && {
+    echo "UPnP TCP port $TPort forwarding.."
+    upnpc -a $MyLocalIp $TPort $TPort TCP
+    echo "$TPort" > $TPortFile
+  }
+}
 
 dirmap(){
   case "$1" in
@@ -144,13 +195,12 @@ registration(){
   done
   echo "$login@$domain:`echo "$password1" | $MD5`" >> $passfile
   plid="$login@$domain"
-  while true
-  do
+  until
     printf "Your name (3-18 chars): "
     read name
-    new_player "$plid" "$name"
-    [[ "$name" =~ ^[0-9a-zA-Z]{3,18}$ ]] && break
-  done
+    [[ "$name" =~ ^[0-9a-zA-Z]{3,18}$ ]]
+  do true; done
+  new_player "$plid" "$name"
 }
 
 login(){
@@ -401,9 +451,20 @@ off_line(){
 }
 
 quit(){
+  echo
   echo "Good bye! Exiting.."
   off_line
   kill $lpid >/dev/null 2>&1
+  [ "$MyLocalIp" != false ] && [ -e /TSPidFile ] && {
+    echo "Stoping telnet service.."
+    kill `cat $TSPidFile`
+    rm -f $TSPidFile
+  }
+  [ "$TPort" != false ] && {
+    echo "Stoping UPnP port forwarding.."
+    upnpc -d $TPort TCP
+    rm -f $TPortFile
+  }
   exit
 }
 
