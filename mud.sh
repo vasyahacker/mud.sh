@@ -97,6 +97,8 @@ case $i in
         echo "Stopping telnet service.."
         kill `cat $TSPidFile`
         rm -f $TSPidFile
+        rm -f $online/*/msg
+        rm -f $online/*
         [ -e $TPortFile ] && {
           echo "Stopping UPnP port forwarding.."
           upnpc -d `cat $TPortFile` TCP
@@ -139,7 +141,7 @@ new_player() # id,name
   mkdir -p $pdir/$1
   printf "$2" > $pdir/$1/name
   printf "1"  > $pdir/$1/where
-  #mkfifo $pdir/$1/msg
+  mkfifo $pdir/$1/msg
   ln -sfn ../../../players/$plid $ldir/1/who
 }
 
@@ -347,10 +349,11 @@ location_edit() # CMD
 }
 
 msg_append(){ #file msg
-  while [ -e $1.lock ]; do sleep 0.4; done;
-  touch $1.lock
-  echo "$2" >> $1
-  rm -f $1.lock
+  # while [ -e $1.lock ]; do sleep 0.4; done;
+  # touch $1.lock
+  # echo "$2" >> $1
+  echo "$2" > $1
+  # rm -f $1.lock
 }
 
 msg(){ # text
@@ -427,18 +430,24 @@ off_line(){
   msg "$my_name fell asleep"
   rm -f $online/$plid
   rm -f $pdir/$plid/online
+  rm -f $pdir/$plid/msg
 }
 
 quit(){
   echo
   echo "Good bye! Exiting.."
   off_line
-  kill `jobs -p` >/dev/null 2>&1
-  kill $lpid >/dev/null 2>&1
+  local myjobs="`jobs -p`"
+  kill -SIGPIPE $lpid >/dev/null 2>&1
+  kill -9 $lpid >/dev/null 2>&1
+  kill -SIGPIPE $myjobs >/dev/null 2>&1
+  kill -9 $myjobs >/dev/null 2>&1
   [ "$TPort" != false ] && {
     echo "Stopping telnet service.."
-    kill `cat $TSPidFile` >/dev/null 2>&1
+    kill -9 `cat $TSPidFile` >/dev/null 2>&1
     rm -f $TSPidFile
+    rm -f $online/*/msg
+    rm -f $online/*
   }
   [ "$MyLocalIp" != false ] && {
     echo "Stopping UPnP port forwarding.."
@@ -545,8 +554,13 @@ EOF
   trap quit SIGHUP SIGINT SIGTERM
   echo "Welcome to the $wName world!"
   echo "Type 'help' if you newbie"
-  listener &
+  # listener &
+  msgpipe=$pdir/$plid/msg
+  # while true;do cat < $pdir/$plid/msg; done &
+  mkfifo $msgpipe
+  cat < $msgpipe &
   lpid=$!
+  while true; do sleep 1; done > $msgpipe &
   on_line
   location_show "`cat $pdir/$plid/where`"
   while true; do read CMD; cmd_parser ;done
