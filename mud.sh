@@ -135,13 +135,12 @@ dirmap(){
 
 new_player() # id,name
 {
-  [[ "$1" =~ ^[a-zA-Z]{3,18}@[a-zA-Z0-9]+$ ]] || { echo "Bad player id"; return; }
+  [[ "$1" =~ ^[0-9a-zA-Z]{3,18}@[a-zA-Z0-9]+$ ]] || { echo "Bad player id"; return; }
   [[ "$2" =~ ^[a-zA-Z]{3,18}$ ]] || { echo "Bad player name"; return; }
   [ -d $pdir/$1 ] && { echo "Player with $1 id already exist"; return; }
   mkdir -p $pdir/$1
   printf "$2" > $pdir/$1/name
   printf "1"  > $pdir/$1/where
-  mkfifo $pdir/$1/msg
   ln -sfn ../../../players/$plid $ldir/1/who
 }
 
@@ -399,23 +398,23 @@ go() # direction
   } || echo "You can't move to `dirmap $dir`"
 }
 
-msg_get_clear(){ # file
-  [ -s $1 ] || return
-  while [ -e $1.lock ]; do sleep 0.4; done
-  touch $1.lock
-  cat $1 
-  > $1
-  rm -f $1.lock
-}
+# msg_get_clear(){ # file
+#   [ -s $1 ] || return
+#   while [ -e $1.lock ]; do sleep 0.4; done
+#   touch $1.lock
+#   cat $1 
+#   > $1
+#   rm -f $1.lock
+# }
 
-listener(){
-  local msg=$pdir/$plid/msg
-  [ -e $msg ] || touch $msg 
-  while true; do
-    msg_get_clear $msg &
-    sleep 0.4
-  done
-}
+# listener(){
+#   local msg=$pdir/$plid/msg
+#   [ -e $msg ] || touch $msg 
+#   while true; do
+#     msg_get_clear $msg &
+#     sleep 0.4
+#   done
+# }
 
 on_line(){
   ln -sfn ../../../players/$plid $ldir/1/who
@@ -556,7 +555,6 @@ EOF
   echo "Type 'help' if you newbie"
   # listener &
   msgpipe=$pdir/$plid/msg
-  # while true;do cat < $pdir/$plid/msg; done &
   mkfifo $msgpipe
   cat < $msgpipe &
   lpid=$!
