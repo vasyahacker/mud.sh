@@ -12,6 +12,8 @@ TSPidFile=$hd/tspid     # Telnet service process id
 MyLocalIp=false         # Local ip for UPnP
 passfile=$hd/.passwd    # users and passwords
 lpid=""                 # message listener process id
+plid=""                 # player id
+rights=""               # user access level
 platform='unknown'
 unamestr=`uname`
 MD5="md5"
@@ -149,6 +151,7 @@ registration(){
   local domain="$wName"
   local password1
   local password2
+
   echo "Registration"
   while true
   do
@@ -173,7 +176,11 @@ registration(){
       continue
     }
   done
-  echo "$login@$domain:`echo "$password1" | $MD5`" >> $passfile
+  [ -z "`ls -A $pdir`" ] && {
+    rights="admin"
+    echo "This is first player, granting administrator access"
+  } || rights="user"
+  echo "$login@$domain:`echo "$password1" | $MD5`:$rights" >> $passfile
   plid="$login@$domain"
   until
     printf "Your name (3-18 chars): "
@@ -198,8 +205,12 @@ login(){
     printf "password:\e[30;40m"
     read password
     printf "\e[0m"
-    grep -q "$login@$domain:`echo "$password" | $MD5`" "$passfile" && {
+    password="`echo "$password" | $MD5`"
+    grep -q "$login@$domain:$password" "$passfile" && {
       plid="$login@$domain"
+      grep -q "$login@$domain:$password:admin" "$passfile" && {
+        rights="admin"
+      } || rights="user"
       break
     } || echo "Login or password incorrect"
   done
@@ -302,7 +313,7 @@ location_show() # id
 
 locations_list()
 {
-  for id in `ls -A locations`
+  for id in `ls -A "$ldir"`
   do
     echo "$id: `cat $ldir/$id/name`"
   done
@@ -458,17 +469,25 @@ quit(){
 
 shopt -s extglob
 cmd_parser(){
+  local user_cmd=true
+  [ $rights == "admin" ] && {
+    user_cmd=false
+    case "$CMD" in
+      ladd\ [nsewud]) location_new "${CMD: -1}";;
+      ldel\ [nsewud]) location_remove "${CMD: -1}";;
+      lconnect\ [nsewud]\ +([0-9]))
+        location_connect `echo "$CMD"|cut -f2 -d" "` `echo "$CMD"|cut -f3 -d" "`
+      ;;
+      lname\ +([[:print:]])) location_edit "$CMD";;
+      ldescr\ *) location_edit "$CMD";;
+      llist) locations_list;;
+      *) user_cmd=true
+    esac
+  }
+  [ "$user_cmd" == false ] && return
   case "$CMD" in
     l|см) location_show "`cat $pdir/$plid/where`" ;;
-    ladd\ [nsewud]) location_new "${CMD: -1}";;
-    ldel\ [nsewud]) location_remove "${CMD: -1}";;
-    lconnect\ [nsewud]\ +([0-9]))
-      location_connect `echo "$CMD"|cut -f2 -d" "` `echo "$CMD"|cut -f3 -d" "`
-    ;;
-    lname\ +([[:print:]])) location_edit "$CMD";;
-    ldescr\ *) location_edit "$CMD";;
     [nsewud]) go "$CMD";;
-    llist) locations_list;;
     /exit|/quit) quit;;
     /help|help|\?) help;;
     *) say "$CMD";;
@@ -490,6 +509,13 @@ w: go west
 u: go up
 d: go down
 
+/quit:
+  exit from game
+EOF
+  [ $rights == "admin" ] && cat <<-EOF
+
+ADMIN COMMANDS
+
 ladd <direction>:
   add new location at nsewud direction
 
@@ -507,10 +533,6 @@ ldescr <description>:
 
 llist:
   list of all locations
-
-/quit:
-  exit from game
-
 EOF
 }
 
