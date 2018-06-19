@@ -87,7 +87,7 @@ case $i in
         done
         until
           printf "Choice your LAN ip address (1-$adrnum): "
-          read num
+          read -e num
           [[ "$num" =~ ^[0-9]{1,2}$ ]] && [ $num -ge 1 ] && [ $num -le $adrnum ]
         do true; done
         MyLocalIp=${MyLocalIp[--num]}
@@ -157,7 +157,7 @@ registration(){
   do
     echo "login must be 3-18 chars or nums"
     printf "login: "
-    read login
+    read -e login
     grep -q "$login@$domain" "$passfile" && {
       echo "login already exist"
       continue
@@ -167,9 +167,9 @@ registration(){
   while true
   do
     printf "password:\e[30;40m"
-    read password1
+    read -e password1
     printf "\e[0mrepeat password:\e[30;40m"
-    read password2
+    read -e password2
     printf "\e[0m"
     [ "$password1" == "$password2" ] && break || {
       echo "Passwords missmatch"
@@ -184,7 +184,7 @@ registration(){
   plid="$login@$domain"
   until
     printf "Your name (3-18 chars): "
-    read name
+    read -e name
     [[ "$name" =~ ^[0-9a-zA-Z]{3,18}$ ]]
   do true; done
   new_player "$plid" "$name"
@@ -197,13 +197,13 @@ login(){
   while [ -z "$plid" ]
   do
     printf "type 'n' for registration or login: "
-    read login
+    read -e login
     [ "$login" == "n" ] && {
       registration
       return
     }
     printf "password:\e[30;40m"
-    read password
+    read -e password
     printf "\e[0m"
     password="`echo "$password" | $MD5`"
     grep -q "$login@$domain:$password" "$passfile" && {
@@ -546,7 +546,7 @@ EOF
   touch $hd/.passwd
   until
     printf "Your personal world name (3-18 chars): "
-    read wName
+    read -e wName
     [[ "$wName" =~ ^[0-9a-zA-Z]{3,18}$ ]]
   do true; done
   echo "$wName" > $WorldName
@@ -583,7 +583,7 @@ EOF
   while true; do sleep 1; done > $msgpipe &
   on_line
   location_show "`cat $pdir/$plid/where`"
-  while true; do read CMD; cmd_parser ;done
+  while true; do read -e CMD; cmd_parser ;done
 
 } || cmd_parser
 
