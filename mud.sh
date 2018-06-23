@@ -138,7 +138,7 @@ dirmap(){
 new_player() # id,name
 {
   [[ "$1" =~ ^[0-9a-zA-Z]{3,18}@[a-zA-Z0-9]+$ ]] || { echo "Bad player id"; return; }
-  [[ "$2" =~ ^[a-zA-Z]{3,18}$ ]] || { echo "Bad player name"; return; }
+  [[ "$2" =~ ^[0-9a-zA-Z]{3,18}$ ]] || { echo "Bad player name"; return; }
   [ -d $pdir/$1 ] && { echo "Player with $1 id already exist"; return; }
   mkdir -p $pdir/$1
   printf "$2" > $pdir/$1/name
@@ -183,7 +183,7 @@ registration(){
   echo "$login@$domain:`echo "$password1" | $MD5`:$rights" >> $passfile
   plid="$login@$domain"
   until
-    printf "Your name (3-18 chars): "
+    printf "\r\nYour name (3-18 chars): "
     read -e name
     [[ "$name" =~ ^[0-9a-zA-Z]{3,18}$ ]]
   do true; done
@@ -196,13 +196,13 @@ login(){
   local password
   while [ -z "$plid" ]
   do
-    printf "type 'n' for registration or login: "
+    printf "\r\nType 'n' for registration or login: "
     read -e login
     [ "$login" == "n" ] && {
       registration
       return
     }
-    printf "password:\e[30;40m"
+    printf "\r\npassword:\e[30;40m"
     read -e password
     printf "\e[0m"
     password="`echo "$password" | $MD5`"
@@ -559,7 +559,7 @@ EOF
   [ "$SHELL" == true ] && {
     echo "Run $0 -tstop if you need to stop service in future"
   }
-  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork EXEC:"$0" > /dev/null 2>&1 &
+  socat -lf $hd/socat.log -lu -lh TCP4-LISTEN:$TPort,reuseaddr,fork,crnl EXEC:"$0" > /dev/null 2>&1 &
   echo "$!" > $TSPidFile
   [ "$MyLocalIp" != false ] && {
     echo "UPnP TCP port $TPort forwarding.."
